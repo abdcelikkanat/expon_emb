@@ -11,6 +11,23 @@ from multiprocessing import Pool, Value, Array
 import networkx as nx
 from scipy.sparse import *
 
+fi = None
+fo= None
+cbow= None
+neg = None
+dim =None
+starting_alpha=None
+win=None
+min_count=None
+num_processes=None
+binary=None
+vocab=None
+syn0=None
+syn1=None
+table=None
+global_word_count=None
+vocab_size=None
+table= None
 
 class VocabItem:
     def __init__(self, word):
@@ -115,7 +132,7 @@ class UnigramTable:
     """
 
     def __init__(self, vocab, power = 0.75):
-        vocab_size = len(vocab)
+        self.vocab_size = len(vocab)
 
         norm = sum([math.pow(t.count, power) for t in vocab])  # Normalizing constant
 
@@ -124,7 +141,7 @@ class UnigramTable:
         table = np.zeros(table_size, dtype=np.uint32)
 
         print('Filling unigram table')
-        p = 0.0  # Cumulative probability
+        p = 0  # Cumulative probability
         i = 0
         for j, unigram in enumerate(vocab):
             p += float(math.pow(unigram.count, power)) / norm
@@ -133,54 +150,33 @@ class UnigramTable:
                 i += 1
         self.table = table
 
-        print("Unigram table construction has just finished!")
-
     def sample(self, count):
         indices = np.random.randint(low=0, high=len(self.table), size=count)
         return [self.table[i] for i in indices]
 
 
-class Utils:
-    def __init__(self):
-        pass
+def sigmoid(z):
+    if z > 6:
+        return 1.0
+    elif z < -6:
+        return 0.0
+    else:
+        return 1 / (1 + math.exp(-z))
 
-    def sigmoid(z):
-        if z > 6:
-            return 1.0
-        elif z < -6:
-            return 0.0
-        else:
-            return 1 / (1 + math.exp(-z))
+def log_sigmoid(z):
 
-    def log_sigmoid(z):
-
-        return -math.log(1.0 + math.exp(-z))
+    return -math.log(1.0 + math.exp(-z))
 
 
-def _init_process(self, *args):
-    #pass
-    #global vocab, syn0, syn1, table, cbow, neg, dim, starting_alpha
-    #global win, num_processes, global_word_count, fi
+def ben_initialize():
+    global dim, vocab_size, syn0, syn1, table, vocab
 
-    vocab, syn0_tmp, syn1_tmp, table, dim, starting_alpha, win, num_processes, global_word_count = args[:-1]
-    #fi = open(self._corpus_file, 'r')
-    with warnings.catch_warnings():
-        warnings.simplefilter('ignore', RuntimeWarning)
-    #    self._syn0 = np.ctypeslib.as_array(syn0_tmp)
-    #    self._syn1 = np.ctypeslib.as_array(syn1_tmp)
-
-
-
-global num_processes, vocab, vocab_size, global_word_count, alpha, fi, win, method, dim, table
-global neg_sample_count, syn0, syn1, dim, min_count
-
-def initialize(corpus_file):
-
-    # Read train file to init vocab
-    vocab = Vocab(corpus_file, min_count)
-    vocab_size = len(vocab)
+    print('Initializing unigram table')
+    table = UnigramTable(vocab)
+    vocab_size = table.vocab_size
 
     # Init syn0 with random numbers from a uniform distribution on the interval [-0.5, 0.5]/dim
+
     tmp = np.random.uniform(low=-0.5 / dim, high=0.5 / dim, size=(vocab_size, dim))
     syn0 = np.ctypeslib.as_ctypes(tmp)
     syn0 = Array(syn0._type_, syn0, lock=False)
@@ -190,24 +186,18 @@ def initialize(corpus_file):
     syn1 = np.ctypeslib.as_ctypes(tmp)
     syn1 = Array(syn1._type_, syn1, lock=False)
 
-    # Global word count
-    global_word_count = Value('i', 0)
-    # Initializing unigram table
-    table = UnigramTable(vocab)
-
-    fi = open(corpus_file, 'r')
-    print("The system has been activated, ready for launching!")
+    return (syn0, syn1)
 
 
-
-
-def train_process(pid):
-
+def ben_train_process(pid):
+    global table
     # Set fi to point to the right chunk of training file
     start = vocab.bytes / num_processes * pid
     end = vocab.bytes if pid == num_processes - 1 else vocab.bytes / num_processes * (pid + 1)
     fi.seek(start)
     # print 'Worker %d beginning training at %d, ending at %d' % (pid, start, end)
+
+    alpha = starting_alpha
 
     word_count = 0
     last_word_count = 0
@@ -227,8 +217,8 @@ def train_process(pid):
                 last_word_count = word_count
 
                 # Recalculate alpha
-                alpha = alpha * (1 - float(global_word_count.value) / vocab.word_count)
-                if alpha < alpha * 0.0001: alpha = alpha * 0.0001
+                alpha = starting_alpha * (1 - float(global_word_count.value) / vocab.word_count)
+                if alpha < starting_alpha * 0.0001: alpha = starting_alpha * 0.0001
 
                 # Print progress info
                 sys.stdout.write("\rAlpha: %f Progress: %d of %d (%.2f%%)" %
@@ -242,20 +232,25 @@ def train_process(pid):
             context_end = min(sent_pos + current_win + 1, len(sent))
             context = sent[context_start:sent_pos] + sent[sent_pos + 1:context_end]  # Turn into an iterator?
 
-            if method == "bernoulli":
+            # CBOW
+            if cbow:
+                pass
 
+            # Skip-gram
+            else:
+                """
                 for context_word in context:
                     # Init neu1e with zeros
                     neu1e = np.zeros(dim)
 
                     # Compute neu1e and update syn1
-                    if neg_sample_count > 0:
-                        classifiers = [(token, 1)] + [(target, 0) for target in table.sample(neg_sample_count)]
+                    if neg > 0:
+                        classifiers = [(token, 1)] + [(target, 0) for target in table.sample(neg)]
                     else:
                         classifiers = zip(vocab[token].path, vocab[token].code)
                     for target, label in classifiers:
                         z = np.dot(syn0[context_word], syn1[target])
-                        p = Utils.sigmoid(z)
+                        p = sigmoid(z)
                         g = alpha * (label - p)
                         neu1e += g * syn1[target]              # Error to backpropagate to syn0
                         syn1[target] += g * syn0[context_word] # Update syn1
@@ -263,15 +258,14 @@ def train_process(pid):
                     # Update syn0
                     syn0[context_word] += neu1e
                 """
-                """
-            else:
+
                 for context_word in context:
                     # Init neule with zeros
                     neu1e = np.zeros(dim)
 
                     # Compute neu1e and update syn1
-                    if neg_sample_count > 0:
-                        classifiers = [(token, 1)] + [(target, 0) for target in table.sample(neg_sample_count)]
+                    if neg > 0:
+                        classifiers = [(token, 1)] + [(target, 0) for target in table.sample(neg)]
                     else:
                         classifiers = zip(vocab[token].path, vocab[token].code)
                     for target, label in classifiers:
@@ -294,7 +288,7 @@ def train_process(pid):
                 for context_word in context:
                     # Init neule with zeros
                     neu1e = np.zeros(dim)
-    
+
                     # Compute neu1e and update syn1
                     if neg > 0:
                         classifiers = [(token, 1)] + [(target, 0) for target in table.sample(neg)]
@@ -307,7 +301,7 @@ def train_process(pid):
                         g = alpha * g
                         neu1e += g * syn1[target]
                         syn1[target] += g * syn0[context_word]
-    
+
                     # Update syn0
                     syn0[context_word] += neu1e
                 """
@@ -323,24 +317,7 @@ def train_process(pid):
     fi.close()
 
 
-def train():
-
-    # Begin training using num_processes workers
-    t0 = time.time()
-    #pool = Pool(processes=self._num_processes, initializer=_init_process,
-    #            initargs=(self._vocab, self._syn0, self._syn1, self._table, self._dim, self._alpha,
-    #                      self._win, self._num_processes, self._global_word_count, self._embed_file))
-    pool = Pool(processes=num_processes)
-    pool.map(train_process, range(num_processes))
-    t1 = time.time()
-
-    print('Completed training. Training took', (t1 - t0) / 60, 'minutes')
-
-    # Save model to file
-    save(vocab, embed_file)
-
-
-def save(vocab, fo):
+def ben_save(vocab, syn0, fo):
     print('Saving model to', fo)
     dim = len(syn0[0])
 
@@ -355,13 +332,53 @@ def save(vocab, fo):
     fo.close()
 
 
+def __init_process(*args):
+    global vocab, syn0, syn1, table, cbow, neg, dim, starting_alpha
+    global win, num_processes, global_word_count, fi
 
+    vocab, syn0_tmp, syn1_tmp, table, cbow, neg, dim, starting_alpha, win, num_processes, global_word_count = args[:-1]
+    fi = open(args[-1], 'r')
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore', RuntimeWarning)
+        syn0 = np.ctypeslib.as_array(syn0_tmp)
+        syn1 = np.ctypeslib.as_array(syn1_tmp)
+
+
+def ben_train():
+    global fi, fo, cbow, neg, dim, alpha, win, min_count, num_processes, binary, vocab_size, table, vocab
+
+
+    # Read train file to init vocab
+    vocab = Vocab(fi, min_count)
+
+    # Init net
+    syn0, syn1 = ben_initialize()
+
+    global_word_count = Value('i', 0)
+    if neg > 0:
+        pass
+    else:
+        print('Initializing Huffman tree')
+        pass
+
+    # Begin training using num_processes workers
+    t0 = time.time()
+    pool = Pool(processes=num_processes, initializer=__init_process,
+                initargs=(vocab, syn0, syn1, table, cbow, neg, dim, alpha,
+                          win, num_processes, global_word_count, fi))
+    pool.map(ben_train_process, range(num_processes))
+    t1 = time.time()
+
+    print('Completed training. Training took', (t1 - t0) / 60, 'minutes')
+
+    # Save model to file
+    ben_save(vocab, syn0, fo)
 
 
 if __name__ == '__main__':
 
-    argsfi = "./citeseer_n80_l10_w10_k80_deepwalk_node_corpus.corpus"
-    argsfo = "./output_exp2.embedding"
+    argsfi = "../inputs/citeseer_node2vec.corpus"
+    argsfo = "../outputs/citeseer_node2vec_gauss.embedding"
     argscbow = 0
     argsneg = 5
     argsdim = 128
@@ -371,15 +388,27 @@ if __name__ == '__main__':
     argsnum_processes = 1
     argsbinary = 0
 
-    corpus_file = "../inputs/citeseer_node2vec2.corpus"
-    embed_file = "../outputs/exp_emb_citeseer_node2vec.embedding"
-    num_processes = 1
-    method_name = 'bernoulli'
+
+    fi = argsfi
+    fo = argsfo
+    #cbow = None
+    neg = 5
     dim = 128
-    neg_samples = 5
-    alpha = 0.025
+    starting_alpha = 0.025
+    alpha = starting_alpha
     win = 10
     min_count = 0
+    num_processes = 1
+    #binary = None
+    #vocab = None
+    #syn0 = None
+    #syn1 = None
+    #table = None
+    #global_word_count = None
+    #vocab_size = None
 
-    initialize(corpus_file=corpus_file)
-    train()
+    #train(argsfi, argsfo, bool(argscbow), argsneg, argsdim, argsalpha, argswin,
+    #      argsmin_count, argsnum_processes, bool(argsbinary))
+
+
+    ben_train()

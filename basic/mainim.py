@@ -10,8 +10,9 @@ import numpy as np
 from multiprocessing import Pool, Value, Array
 
 
-def trick(arg, **kwarg):
-    My.handle(*arg, **kwarg)
+global deneme
+
+deneme = 5
 
 
 class My:
@@ -21,18 +22,15 @@ class My:
 
 
     def start(self):
+        pass
 
-        pool = Pool(processes=2)
-        pool.map(self.handle, zip([self] * len(self.names)))
+def mytest():
+    deneme = 3
 
-    def handle(self):
-        #print(name)
-        self.names.append('0')
 
-    def get(self):
 
-        print(self.names)
 
-m = My(names = ['ali', 'veli', '49', '50', 'ayse'])
-m.start()
-m.get()
+print(deneme)
+
+
+
