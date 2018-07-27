@@ -377,8 +377,8 @@ def ben_train():
 
 if __name__ == '__main__':
 
-    argsfi = "../inputs/citeseer_node2vec.corpus"
-    argsfo = "../outputs/citeseer_node2vec_gauss.embedding"
+    argsfi = "../inputs/dblp_node2vec.corpus"
+    argsfo = "../outputs/dblp_node2vec_gauss.embedding"
     argscbow = 0
     argsneg = 5
     argsdim = 128
